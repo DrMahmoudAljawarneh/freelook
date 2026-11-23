@@ -65,13 +65,25 @@ pub fn run() {
             commands::set_pending_download_name,
         ])
         .setup(|app| {
-            // Create tray icon
+            // Create tray icon. A missing tray must never stop the app from
+            // starting: on some desktops (no StatusNotifier watcher, GNOME
+            // without AppIndicator support, deprecated libayatana-appindicator
+            // failing to initialise) tray creation fails and the old
+            // `expect()` here aborted startup before the mail window existed.
             let app_handle = app.handle().clone();
-            tray::create_tray(&app_handle).expect("Failed to create tray");
+            if let Err(err) = tray::create_tray(&app_handle) {
+                eprintln!("[freelook] tray unavailable, continuing without it: {err}");
+            }
 
-            // Set up native menu
-            let menu = menu::create_menu(&app_handle).expect("Failed to create menu");
-            app.set_menu(menu).expect("Failed to set menu");
+            // Set up native menu (also non-fatal)
+            match menu::create_menu(&app_handle) {
+                Ok(menu) => {
+                    if let Err(err) = app.set_menu(menu) {
+                        eprintln!("[freelook] could not install menu: {err}");
+                    }
+                }
+                Err(err) => eprintln!("[freelook] menu unavailable: {err}"),
+            }
 
             // Handle native menu events
             let app_handle_menu = app.handle().clone();
@@ -84,7 +96,9 @@ pub fn run() {
 
             // Start loading Outlook immediately. Network probing only controls the splash fallback.
             let app_handle2 = app.handle().clone();
-            let _ = windows::create_main_window(&app_handle2);
+            if let Err(err) = windows::create_main_window(&app_handle2) {
+                eprintln!("[freelook] failed to create main window: {err}");
+            }
             setup_main_window(&app_handle2);
             let _ = windows::apply_main_settings(&app_handle2);
 

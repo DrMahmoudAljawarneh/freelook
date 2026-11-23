@@ -1,0 +1,28 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-utils/schema/capability.json",
+  "identifier": "remote-outlook",
+  "description": "IPC access for the Freelook helper script running inside Outlook Web",
+  "windows": ["main"],
+  "local": false,
+  "remote": {
+    "urls": [
+      "https://outlook.live.com/*",
+      "https://outlook.office.com/*",
+      "https://outlook.office365.com/*",
+      "https://outlook.cloud.microsoft/*",
+      "https://www.microsoft365.com/*",
+      "https://m365.cloud.microsoft/*",
+      "https://login.live.com/*",
+      "https://login.microsoftonline.com/*",
+      "https://login.microsoft.com/*",
+      "https://login.windows.net/*",
+      "https://account.microsoft.com/*"
+    ]
+  },
+  "permissions": [
+    "allow-mail-view",
+    "notification:allow-is-permission-granted",
+    "notification:allow-request-permission",
+    "notification:allow-notify"
+  ]
+}

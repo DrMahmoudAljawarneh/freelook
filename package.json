@@ -1,10 +1,10 @@
 {
   "name": "freelook",
   "productName": "Freelook",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "description": "Outlook desktop application powered by Tauri",
-  "author": "Howard Ju <howard.ju@outlook.com>",
-  "repository": "https://github.com/eNkru/freelook",
+  "author": "DrMahmoudAljawarneh",
+  "repository": "https://github.com/DrMahmoudAljawarneh/freelook",
   "license": "MIT",
   "keywords": [
     "Tauri",
@@ -33,10 +33,10 @@
     "node": ">=24"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.12.1"
+    "@tauri-apps/api": "^2.12.5"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.12.1",
+    "@tauri-apps/cli": "^2.12.6",
     "typescript": "^7.0.2"
   }
 }

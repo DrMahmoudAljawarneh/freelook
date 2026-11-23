@@ -12,10 +12,49 @@ const DEEPLINK_URLS: &[&str] = &[
     "outlook.live.com/mail/deeplink",
     "outlook.office365.com/mail/deeplink",
     "outlook.office.com/mail/deeplink",
+    "outlook.cloud.microsoft/mail/deeplink",
     "outlook.live.com/calendar/0/deeplink",
     "outlook.office365.com/calendar/0/deeplink",
     "outlook.office.com/calendar/0/deeplink",
+    "outlook.cloud.microsoft/calendar/0/deeplink",
 ];
+
+/// Microsoft and Outlook domains (and their subdomains) that should stay in-app.
+const MICROSOFT_HOST_SUFFIXES: &[&str] = &[
+    "outlook.com",
+    "cloud.microsoft",
+    "microsoft365.com",
+    "office.com",
+    "office.net",
+    "office365.com",
+    "office365.net",
+    "officeppe.net",
+    "live.com",
+    "live.net",
+    "microsoft.com",
+    "microsoftusercontent.com",
+    "microsoftonline.com",
+    "msauth.net",
+    "msocdn.com",
+    "msftauth.net",
+    "1drv.ms",
+    "sharepoint.com",
+    "sharepointonline.com",
+    "onenote.com",
+    "onedrive.com",
+    "svc.ms",
+    "windows.net",
+];
+
+/// Outlook on the web rejects the stock WebKitGTK user agent ("…Linux x86_64 …
+/// Safari/605.1.15") with a 500 `OwaBasicUnsupportedException` page during
+/// boot. WebKitGTK is a Safari-class engine, so present the webview as desktop
+/// Safari on macOS: engine and UA then agree, which keeps OWA on the code path
+/// it uses for Apple's WebKit instead of a Chromium-only path it cannot run.
+///
+/// Keep this in sync with `wry`'s WebKitGTK `WebSettings:user-agent`, which is
+/// used for both `navigator.userAgent` and the `User-Agent` request header.
+const OUTLOOK_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15";
 
 /// Check if a URL belongs to a Microsoft domain that should stay in-app
 fn is_microsoft_url(url: &url::Url) -> bool {
@@ -34,35 +73,12 @@ fn is_microsoft_url(url: &url::Url) -> bool {
     match url.host_str() {
         Some(host) => {
             let h = host.to_lowercase();
-            h == "outlook.live.com"
-                || h == "outlook.office365.com"
-                || h == "outlook.office.com"
-                || h == "login.microsoftonline.com"
-                || h == "login.live.com"
-                || h == "outlook.live.net"
-                || h == "www.office.com"
-                || h.ends_with(".outlook.com")
-                || h.ends_with(".outlook.live.com")
-                || h.ends_with(".outlook.live.net")
-                || h.ends_with(".office.net")
-                || h.ends_with(".office365.com")
-                || h.ends_with(".office365.net")
-                || h.ends_with(".office.com")
-                || h.ends_with(".officeppe.net")
-                || h.ends_with(".officeapps.live.com")
-                || h.ends_with(".microsoft.com")
-                || h.ends_with(".microsoftusercontent.com")
-                || h.ends_with(".microsoftonline.com")
-                || h.ends_with(".msauth.net")
-                || h.ends_with(".msocdn.com")
-                || h.ends_with(".msftauth.net")
-                || h.ends_with(".live.com")
-                || h.ends_with(".1drv.ms")
-                || h.ends_with(".sharepoint.com")
-                || h.ends_with(".sharepointonline.com")
-                || h.ends_with(".onenote.com")
-                || h.ends_with(".onedrive.com")
-                || h.ends_with(".svc.ms")
+            if host_matches_suffix(&h, "safelinks.protection.outlook.com") {
+                return false;
+            }
+            MICROSOFT_HOST_SUFFIXES
+                .iter()
+                .any(|domain| host_matches_suffix(&h, domain))
         }
         None => false,
     }
@@ -86,48 +102,92 @@ fn path_is_pdf_or_doc(path: &Path) -> bool {
 }
 
 /// Check if a URL is an ad/tracking URL that should be silently blocked
+/// Domains whose subdomains are all ad/tracking/attribution endpoints. Matching
+/// is suffix-based so `evil-adnxs.com.attacker.tld` cannot slip through the way
+/// a plain `contains()` check would.
+const AD_HOST_SUFFIXES: &[&str] = &[
+    // Cookie-sync, intent data and attribution pixels. `company-target.com` is
+    // the Bombora sync endpoint Outlook's ad slots redirect to
+    // (`s.company-target.com/s/sync?exc=lr`), which the old code happily handed
+    // to the system browser.
+    "company-target.com",
+    "bombora.com",
+    "ml314.com",
+    "adsrvr.org",
+    "agkn.com",
+    "bluekai.com",
+    "demdex.net",
+    "rlcdn.com",
+    "liadm.com",
+    "crwdcntrl.net",
+    "exelator.com",
+    "mathtag.com",
+    "tapad.com",
+    "semasio.net",
+    // Ad exchanges, SSPs and DSPs
+    "adnxs.com",
+    "adnxs.net",
+    "amazon-adsystem.com",
+    "adsystem.com",
+    "adsafeprotected.com",
+    "moatads.com",
+    "serving-sys.com",
+    "sizmek.com",
+    "rubiconproject.com",
+    "magnite.com",
+    "pubmatic.com",
+    "openx.net",
+    "casalemedia.com",
+    "indexww.com",
+    "33across.com",
+    "turn.com",
+    "bidswitch.net",
+    "contextweb.com",
+    "sharethrough.com",
+    "spotxchange.com",
+    "tidaltv.com",
+    "tremorhub.com",
+    "videologygroup.com",
+    "yieldmo.com",
+    "smartadserver.com",
+    "adform.net",
+    "criteo.com",
+    "criteo.net",
+    "taboola.com",
+    "outbrain.com",
+    "adcolony.com",
+    "adtechus.com",
+    // Google / Meta measurement
+    "doubleclick.net",
+    "googlesyndication.com",
+    "googleadservices.com",
+    "googletagmanager.com",
+    "google-analytics.com",
+    "scorecardresearch.com",
+    "quantserve.com",
+    "facebook.net",
+];
+
+/// Fragments for ad SDK hosts that do not follow a stable domain shape.
+const AD_HOST_FRAGMENTS: &[&str] = &["adsdkprod", "adsdk"];
+
+fn host_matches_suffix(host: &str, domain: &str) -> bool {
+    host == domain
+        || (host.len() > domain.len()
+            && host.ends_with(domain)
+            && host.as_bytes()[host.len() - domain.len() - 1] == b'.')
+}
+
 fn is_ad_url(url: &url::Url) -> bool {
     match url.host_str() {
         Some(host) => {
             let h = host.to_lowercase();
-            // SafeFrame ad SDK
-            h.contains("adsdkprod")
-                || h.contains("adsdk")
-                // AppNexus / Xandr ad tracking
-                || h.contains("adnxs.com")
-                || h.contains("adnxs.net")
-                // Google ad services
-                || h.contains("doubleclick.net")
-                || h.contains("googlesyndication.com")
-                || h.contains("googleadservices.com")
-                || h.contains("googletagmanager.com")
-                // Common ad domains
-                || h.starts_with("ads.")
+            h.starts_with("ads.")
                 || h.starts_with("ad.")
-                || h.contains("adsystem.com")
-                || h.contains("advertising.com")
-                || h.contains("adtechus.com")
-                || h.contains("adcolony.com")
-                || h.contains("adsafeprotected.com")
-                || h.contains("moatads.com")
-                || h.contains("serving-sys.com")
-                || h.contains("sizmek.com")
-                || h.contains("rubiconproject.com")
-                || h.contains("pubmatic.com")
-                || h.contains("openx.net")
-                || h.contains("casalemedia.com")
-                || h.contains("indexww.com")
-                || h.contains("turn.com")
-                || h.contains("mathtag.com")
-                || h.contains("bidswitch.net")
-                || h.contains("contextweb.com")
-                || h.contains("sharethrough.com")
-                || h.contains("spotxchange.com")
-                || h.contains("tidaltv.com")
-                || h.contains("tremorhub.com")
-                || h.contains("videologygroup.com")
-                || h.contains("yieldmo.com")
-                || h.contains("smartadserver.com")
+                || AD_HOST_SUFFIXES
+                    .iter()
+                    .any(|domain| host_matches_suffix(&h, domain))
+                || AD_HOST_FRAGMENTS.iter().any(|fragment| h.contains(fragment))
         }
         None => false,
     }
@@ -322,12 +382,13 @@ pub fn create_main_window(app: &AppHandle) -> Result<(), String> {
     let homepage_url = get_homepage_url(app);
     let app_handle = app.clone();
 
-    let _window = WebviewWindowBuilder::new(
+    let window = WebviewWindowBuilder::new(
         app,
         "main",
         WebviewUrl::External(homepage_url.parse().unwrap()),
     )
     .title("Freelook")
+    .user_agent(OUTLOOK_USER_AGENT)
     .inner_size(width, height)
     .position(x, y)
     .visible(false)
@@ -416,10 +477,17 @@ pub fn create_main_window(app: &AppHandle) -> Result<(), String> {
             // in Preview.app / Word / Excel.
             true
         } else if is_ad_url(url) {
-            // Silently block ad/tracking navigations
+            eprintln!("[freelook] blocked tracker navigation: {url}");
+            false
+        } else if matches!(url.scheme(), "mailto" | "tel") {
+            eprintln!("[freelook] external scheme navigation: {url}");
+            let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
             false
         } else {
-            let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
+            // Block unsolicited / iframe navigations to non-Microsoft URLs
+            // without launching the external browser; user-initiated external
+            // link clicks are handled by `interceptClick` and `on_new_window`.
+            eprintln!("[freelook] blocked external navigation: {url}");
             false
         }
     })
@@ -427,7 +495,7 @@ pub fn create_main_window(app: &AppHandle) -> Result<(), String> {
         if is_microsoft_url(&url) {
             tauri::webview::NewWindowResponse::Allow
         } else if is_ad_url(&url) {
-            // Silently deny ad/tracking popups
+            eprintln!("[freelook] blocked tracker popup: {url}");
             tauri::webview::NewWindowResponse::Deny
         } else {
             let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
@@ -442,6 +510,30 @@ pub fn create_main_window(app: &AppHandle) -> Result<(), String> {
     .build()
     .map_err(|e| e.to_string())?;
 
+    // If the remembered frame falls outside every monitor (display unplugged,
+    // resolution changed, different multi-monitor layout) the window would be
+    // created off-screen and look like "the app did not open". Recenter it.
+    let monitor = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten());
+    if let (Ok(pos), Some(monitor)) = (window.outer_position(), monitor) {
+        let mpos = monitor.position();
+        let msize = monitor.size();
+        let margin = 80;
+        let on_screen = pos.x + margin >= mpos.x
+            && pos.y + margin >= mpos.y
+            && pos.x < mpos.x + msize.width as i32 - margin
+            && pos.y < mpos.y + msize.height as i32 - margin;
+        if !on_screen {
+            eprintln!(
+                "[freelook] saved window position {pos:?} is off-screen, recentering"
+            );
+            let _ = window.center();
+        }
+    }
+
     Ok(())
 }
 
@@ -455,7 +547,7 @@ pub fn apply_main_settings(app: &AppHandle) -> Result<(), String> {
         inject_main_css(&window, &get_main_css(app))?;
 
         // Inject link click interceptor
-        let _ = window.eval(get_link_interceptor_js());
+        let _ = window.eval(&get_link_interceptor_js());
 
         // Inject floating refresh button
         let _ = window.eval(get_refresh_button_js());
@@ -546,7 +638,11 @@ pub fn refresh_page(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Inject CSS into a webview
+/// Inject CSS into a webview.
+///
+/// Safe under `require-trusted-types-for 'script'`: `insertAdjacentHTML` with a
+/// raw string throws `TypeError: This assignment requires a TrustedHTML`, while
+/// `style.textContent` is not a Trusted Types sink.
 pub fn css_inject(app: AppHandle, webview_label: String, css: String) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(&webview_label) {
         let escaped_css = css
@@ -554,7 +650,18 @@ pub fn css_inject(app: AppHandle, webview_label: String, css: String) -> Result<
             .replace('`', "\\`")
             .replace('$', "\\$");
         let js = format!(
-            "document.head.insertAdjacentHTML('beforeend', `<style>{}</style>`)",
+            r#"
+            (() => {{
+                const id = "freelook-injected-css";
+                let style = document.getElementById(id);
+                if (!style) {{
+                    style = document.createElement("style");
+                    style.id = id;
+                    (document.head || document.documentElement).appendChild(style);
+                }}
+                style.textContent = `{}`;
+            }})();
+            "#,
             escaped_css
         );
         window.eval(&js).map_err(|e| e.to_string())?;
@@ -574,6 +681,7 @@ pub fn is_calendar_deeplink(url: &str) -> bool {
     url.contains("outlook.live.com/calendar/0/deeplink")
         || url.contains("outlook.office365.com/calendar/0/deeplink")
         || url.contains("outlook.office.com/calendar/0/deeplink")
+        || url.contains("outlook.cloud.microsoft/calendar/0/deeplink")
 }
 
 /// Get the CSS for ad blocking
@@ -591,7 +699,13 @@ pub fn get_main_css(app: &AppHandle) -> String {
     )
 }
 
-/// Get the JavaScript that injects a floating refresh button
+/// Get the JavaScript that injects a floating refresh button.
+///
+/// The SVG is built with `createElementNS`/`setAttribute` rather than
+/// `innerHTML`: Outlook's page is served with
+/// `require-trusted-types-for 'script'`, and a raw-string `innerHTML`
+/// assignment throws `TypeError: This assignment requires a TrustedHTML`
+/// inside that CSP.
 fn get_refresh_button_js() -> &'static str {
     r#"
     (function() {
@@ -600,7 +714,28 @@ fn get_refresh_button_js() -> &'static str {
         const btn = document.createElement('div');
         btn.id = 'freelook-refresh-btn';
         btn.title = 'Refresh page';
-        btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>';
+
+        const SVG_NS = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(SVG_NS, 'svg');
+        svg.setAttribute('width', '20');
+        svg.setAttribute('height', '20');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('fill', 'none');
+        svg.setAttribute('stroke', 'white');
+        svg.setAttribute('stroke-width', '2.5');
+        svg.setAttribute('stroke-linecap', 'round');
+        svg.setAttribute('stroke-linejoin', 'round');
+
+        const polyline = document.createElementNS(SVG_NS, 'polyline');
+        polyline.setAttribute('points', '23 4 23 10 17 10');
+
+        const path = document.createElementNS(SVG_NS, 'path');
+        path.setAttribute('d', 'M20.49 15a9 9 0 1 1-2.12-9.36L23 10');
+
+        svg.appendChild(polyline);
+        svg.appendChild(path);
+        btn.appendChild(svg);
+
         btn.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:2147483647;width:44px;height:44px;border-radius:50%;background:rgba(0,120,212,0.85);display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.3);transition:background 0.2s,transform 0.15s;backdrop-filter:blur(4px);';
 
         btn.addEventListener('mouseenter', function() {
@@ -617,7 +752,7 @@ fn get_refresh_button_js() -> &'static str {
             location.reload();
         });
 
-        document.body.appendChild(btn);
+        (document.body || document.documentElement).appendChild(btn);
     })();
     "#
 }
@@ -641,15 +776,18 @@ pub fn get_no_frame_css() -> String {
 /// JavaScript that intercepts non-Microsoft link clicks and opens them externally,
 /// and remembers a suggested filename for the next download so the save dialog has a
 /// sensible default name.
-fn get_link_interceptor_js() -> &'static str {
-    r#"
+fn get_link_interceptor_js() -> String {
+    let ms_domains_json =
+        serde_json::to_string(MICROSOFT_HOST_SUFFIXES).unwrap_or_else(|_| "[]".to_string());
+    let template = r#"
     (function() {
         if (window.__freelook_link_interceptor__) return;
         window.__freelook_link_interceptor__ = true;
 
+        var MS_DOMAINS = __MS_DOMAINS__;
+
         function isMsUrl(href) {
             if (!href || href === '#' || href.startsWith('javascript:')) return true;
-            if (href.startsWith('/')) return true;
             if (href.startsWith('mailto:') || href.startsWith('tel:')) return true;
             if (href.startsWith('about:') || href.startsWith('data:')) return true;
             try {
@@ -662,22 +800,12 @@ fn get_link_interceptor_js() -> &'static str {
                     }
                 }
                 var h = u.hostname.toLowerCase();
-                return h === 'outlook.live.com' || h === 'outlook.office365.com'
-                    || h === 'outlook.office.com' || h === 'login.microsoftonline.com'
-                    || h === 'login.live.com' || h === 'www.office.com'
-                    || h.endsWith('.outlook.com') || h.endsWith('.outlook.live.com')
-                    || h.endsWith('.outlook.live.net') || h.endsWith('.office.net')
-                    || h.endsWith('.office365.com') || h.endsWith('.office365.net')
-                    || h.endsWith('.office.com') || h.endsWith('.officeppe.net')
-                    || h.endsWith('.officeapps.live.com')
-                    || h.endsWith('.microsoft.com') || h.endsWith('.microsoftonline.com')
-                    || h.endsWith('.microsoftusercontent.com')
-                    || h.endsWith('.msauth.net') || h.endsWith('.msftauth.net')
-                    || h.endsWith('.msocdn.com')
-                    || h.endsWith('.live.com') || h.endsWith('.1drv.ms')
-                    || h.endsWith('.sharepoint.com') || h.endsWith('.sharepointonline.com')
-                    || h.endsWith('.onenote.com') || h.endsWith('.onedrive.com')
-                    || h.endsWith('.svc.ms');
+                if (h === 'safelinks.protection.outlook.com' || h.endsWith('.safelinks.protection.outlook.com')) {
+                    return false;
+                }
+                return MS_DOMAINS.some(function(domain) {
+                    return h === domain || h.endsWith('.' + domain);
+                });
             } catch(e) { return true; }
         }
 
@@ -781,13 +909,20 @@ fn get_link_interceptor_js() -> &'static str {
             });
         }
 
-        window.addEventListener('load', function() {
-            attachToMailIframes();
-            setTimeout(attachToMailIframes, 1000);
-            setTimeout(attachToMailIframes, 3000);
-        });
+        attachToMailIframes();
+        setTimeout(attachToMailIframes, 1000);
+        setTimeout(attachToMailIframes, 3000);
+        document.addEventListener('load', function(e) {
+            if (e.target && e.target.tagName === 'IFRAME') {
+                attachToMailIframes();
+            }
+        }, true);
+        if (document.readyState !== 'complete') {
+            window.addEventListener('load', attachToMailIframes);
+        }
     })();
-    "#
+    "#;
+    template.replace("__MS_DOMAINS__", &ms_domains_json)
 }
 
 /// Get the unread observer JavaScript
@@ -843,4 +978,56 @@ pub fn get_unread_js(app: &AppHandle) -> String {
         }}, 10000);
         "#
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn allows_outlook_and_microsoft_domains() {
+        for raw in [
+            "https://outlook.live.com/mail/0/inbox",
+            "https://outlook.office.com/mail/",
+            "https://outlook.office365.com/mail/deeplink/read/123",
+            "https://outlook.cloud.microsoft/mail/",
+            "https://m365.cloud.microsoft/apps",
+            "https://outlook.com/",
+            "https://www.microsoft365.com/",
+            "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+            "https://login.live.com/",
+            "https://login.windows.net/tenant/oauth2/authorize",
+            "https://attachment.outlook.live.net/owa/auth/123",
+            "blob:https://outlook.cloud.microsoft/1234-5678",
+            "about:blank",
+        ] {
+            let url = url::Url::parse(raw).unwrap();
+            assert!(is_microsoft_url(&url), "expected in-app for {raw}");
+        }
+    }
+
+    #[test]
+    fn rejects_external_and_spoofed_domains() {
+        for raw in [
+            "https://example.com/article",
+            "https://notoutlook.com/",
+            "https://outlook.com.evil.com/",
+            "https://cloud.microsoft.evil.com/",
+            "https://nam12.safelinks.protection.outlook.com/?url=https%3A%2F%2Fexample.com",
+            "mailto:user@example.com",
+            "tel:+1234567890",
+        ] {
+            let url = url::Url::parse(raw).unwrap();
+            assert!(!is_microsoft_url(&url), "expected external for {raw}");
+        }
+    }
+
+    #[test]
+    fn link_interceptor_shares_microsoft_domains() {
+        let js = get_link_interceptor_js();
+        assert!(js.contains("cloud.microsoft"));
+        assert!(js.contains("microsoft365.com"));
+        assert!(js.contains("outlook.com"));
+        assert!(js.contains("safelinks.protection.outlook.com"));
+    }
 }

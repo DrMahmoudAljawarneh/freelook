@@ -1,0 +1,44 @@
+# Permissions for the commands declared in src-tauri/src/commands.rs.
+# App-level permissions are referenced by their bare identifier in capabilities
+# (no "plugin:" prefix).
+
+[[permission]]
+identifier = "allow-local-ui"
+description = """
+Allows Freelook's own windows (splash, settings, login) to call application
+commands. Required once an application permission manifest exists, because
+presence of the manifest turns the command ACL on for local origins too.
+"""
+commands.allow = [
+  "get_config",
+  "get_configs",
+  "set_config",
+  "delete_config",
+  "check_network",
+  "reconnect",
+  "reconnect_and_launch",
+  "update_unread",
+  "show_main_window",
+  "reset_window_frame",
+  "open_settings",
+  "restart_app",
+  "refresh_page",
+  "css_inject",
+  "submit_login",
+  "open_external_url",
+  "set_pending_download_name",
+]
+
+[[permission]]
+identifier = "allow-mail-view"
+description = """
+Allows the small set of commands injected into the Outlook page
+(source: src-tauri/src/windows.rs) to run. Keep this list minimal: anything
+listed here can be called by whatever JavaScript runs in that webview.
+"""
+commands.allow = [
+  "update_unread",
+  "show_main_window",
+  "open_external_url",
+  "set_pending_download_name",
+]
